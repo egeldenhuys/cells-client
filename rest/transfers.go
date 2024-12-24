@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -18,7 +19,7 @@ import (
 )
 
 // GetFile retrieves a file from the server in one big download (**no** multipart download for the time being).
-func (client *SdkClient) GetFile(ctx context.Context, pathToFile string) (io.Reader, int, error) {
+func (client *SdkClient) GetFile(ctx context.Context, pathToFile string) (io.Reader, int, time.Time, error) {
 	hO, err := client.GetS3Client().HeadObject(
 		ctx,
 		&s3.HeadObjectInput{
@@ -27,7 +28,7 @@ func (client *SdkClient) GetFile(ctx context.Context, pathToFile string) (io.Rea
 		},
 	)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, time.Now(), err
 	}
 
 	obj, err := client.GetS3Client().GetObject(
@@ -38,9 +39,9 @@ func (client *SdkClient) GetFile(ctx context.Context, pathToFile string) (io.Rea
 		},
 	)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, time.Now(), err
 	}
-	return obj.Body, int(*hO.ContentLength), nil
+	return obj.Body, int(*hO.ContentLength), *hO.LastModified, nil
 }
 
 // PutFile upload a local file to the server without using multipart upload.
@@ -49,19 +50,25 @@ func (client *SdkClient) PutFile(
 	pathToFile string,
 	content io.ReadSeeker,
 	checkExists bool,
+	modTime int64,
 	errChan ...chan error,
 ) (*s3.PutObjectOutput, error) {
 
 	key := pathToFile
 	var obj *s3.PutObjectOutput
+
+	meta := make(map[string]string)
+	meta["Original-Last-Modified"] = strconv.Itoa(int(modTime))
+
 	err := RetryCallback(func() error {
 		var tmpErr error
 		obj, tmpErr = client.GetS3Client().PutObject(
 			ctx,
 			&s3.PutObjectInput{
-				Bucket: aws.String(client.GetBucketName()),
-				Key:    aws.String(pathToFile),
-				Body:   content,
+				Bucket:   aws.String(client.GetBucketName()),
+				Key:      aws.String(pathToFile),
+				Body:     content,
+				Metadata: meta,
 			},
 		)
 		return tmpErr
@@ -97,7 +104,7 @@ func (client *SdkClient) PutFile(
 }
 
 func (client *SdkClient) s3Upload(ctx context.Context, path string,
-	content io.ReadSeeker, fSize int64, verbose bool, errChan ...chan error) error {
+	content io.ReadSeeker, fSize int64, verbose bool, modTime int64, errChan ...chan error) error {
 
 	ps, err := sdkS3.ComputePartSize(fSize, UploadDefaultPartSize, UploadMaxPartsNumber)
 	if err != nil {
@@ -124,10 +131,14 @@ func (client *SdkClient) s3Upload(ctx context.Context, path string,
 	// Adds a callback entry point so that we can follow the effective part upload.
 	uploader.BufferProvider = sdkS3.NewCallbackTransferProvider(path, fSize, ps, numParts, verbose)
 
+	meta := make(map[string]string)
+	meta["Original-Last-Modified"] = strconv.Itoa(int(modTime))
+
 	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(client.GetBucketName()),
-		Key:    aws.String(path),
-		Body:   content,
+		Bucket:   aws.String(client.GetBucketName()),
+		Key:      aws.String(path),
+		Body:     content,
+		Metadata: meta,
 	})
 
 	if err != nil {

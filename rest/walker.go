@@ -515,21 +515,21 @@ func (c *CrawlNode) upload(ctx context.Context, src *CrawlNode, bar *uiprogress.
 
 	var upErr error
 	if stats.Size() <= UploadSwitchMultipart*(1024*1024) {
-		if _, e = c.sdkClient.PutFile(ctx, fullPath, content, false); e != nil {
+		if _, e = c.sdkClient.PutFile(ctx, fullPath, content, false, stats.ModTime().Unix()); e != nil {
 			upErr = fmt.Errorf("could not upload single part file %s: %s", fullPath, e.Error())
 		}
 		if bar == nil {
 			Log.Debugf("\t%s: uploaded\n", fullPath)
 		}
 	} else {
-		upErr = c.sdkClient.s3Upload(ctx, fullPath, content, stats.Size(), IsDebugEnabled(), errChan)
+		upErr = c.sdkClient.s3Upload(ctx, fullPath, content, stats.Size(), IsDebugEnabled(), stats.ModTime().Unix(), errChan)
 	}
 	// fmt.Println("... About to return from upload, error:", upErr)
 	return upErr
 }
 
 func (c *CrawlNode) download(ctx context.Context, src *CrawlNode, bar *uiprogress.Bar) error {
-	reader, length, e := c.sdkClient.GetFile(ctx, src.FullPath)
+	reader, length, mtime, e := c.sdkClient.GetFile(ctx, src.FullPath)
 	if e != nil {
 		return e
 	}
@@ -568,6 +568,9 @@ func (c *CrawlNode) download(ctx context.Context, src *CrawlNode, bar *uiprogres
 		Log.Warnf("written length (%d) does not fit with source file length (%d) for %s\n",
 			written, int64(length), src.FullPath)
 	}
+
+	os.Chtimes(localTargetPath, time.Unix(0, 0), mtime)
+
 	return nil
 }
 
