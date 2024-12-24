@@ -58,7 +58,7 @@ func (client *SdkClient) PutFile(
 	var obj *s3.PutObjectOutput
 
 	meta := make(map[string]string)
-	meta["Original-Last-Modified"] = strconv.Itoa(int(modTime))
+	meta["Mtime"] = strconv.FormatInt(modTime, 10) // TODO: make enum
 
 	err := RetryCallback(func() error {
 		var tmpErr error
@@ -132,7 +132,7 @@ func (client *SdkClient) s3Upload(ctx context.Context, path string,
 	uploader.BufferProvider = sdkS3.NewCallbackTransferProvider(path, fSize, ps, numParts, verbose)
 
 	meta := make(map[string]string)
-	meta["Original-Last-Modified"] = strconv.Itoa(int(modTime))
+	meta["Mtime"] = strconv.FormatInt(modTime, 10) // TODO: make enum
 
 	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket:   aws.String(client.GetBucketName()),
